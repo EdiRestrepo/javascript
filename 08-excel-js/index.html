@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Excel.js</title>
+    <style>
+        body{
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+        }
+
+        *, *::before, *::after{
+            box-sizing: border-box;
+        }
+
+        img{
+            max-width: 20px;
+            height: auto;
+        }
+        table{
+            border-collapse: collapse;
+        }
+
+        thead,
+        tr td:first-child{
+            background: #eee;
+        }
+
+        th, td{
+            border: 1px solid #ccc;
+        }
+
+        th, td {
+            border: 1px solid #ccc;
+            font-weight: normal;
+            font-size: 12px;
+            text-align: center;
+            width: 64px;
+            height: 20px;
+            vertical-align: middle;
+            position: relative;
+        }
+
+        /* td:active{
+            border-radius: 2px;
+            outline: 2px solid #09f;
+        } */
+
+        span,
+        input{
+            position: absolute;
+            inset: 0;
+            vertical-align: middle;
+            display: inline-flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        input{
+            border: 0;
+            opacity: 0;
+            pointer-events: none;
+            width: 100%;
+            border-radius: 2px;
+
+            &:focus{
+                opacity: 1;
+                outline: 2px solid #09f;
+            }
+        }
+
+        .selected{
+            background: rgb(174, 223, 255);
+        }
+
+        th.selected{
+            background: rgb(146, 211, 255);
+        }
+
+
+    </style>
+    <script type="module">
+        const $ = el => document.querySelector(el);
+        const $$ = el => document.querySelectorAll(el);
+        
+        const $table = $('table')
+        const $head = $('thead')
+        const $body = $('tbody')
+
+        const ROWS = 10;
+        const COLUMNS = 5;
+        const FIRST_CHAR_CODE = 65;
+
+        const range = length => Array.from({ length }, (_, i) => i)
+        const getColumn = i => String.fromCharCode(FIRST_CHAR_CODE + i)
+
+        let selectedColum = null
+
+        let STATE = range(COLUMNS)
+            .map(i => range(ROWS).map(j=>({ computedValue: j, value:j})))
+
+        console.log(STATE);
+
+    
+        function updateCell({x,y,value}){
+            const newState = structuredClone(STATE)
+
+            const constants = generateCellsConstants(newState)
+
+            const cell = newState[x][y]
+
+            // const computedValue = Number(value)
+            const computedValue = computeValue(value, constants)
+            cell.computedValue = computedValue // -> span
+            cell.value = value // -> input
+
+            newState[x][y] = cell
+
+            computeAllCells(newState, generateCellsConstants(newState))
+
+            STATE = newState
+
+            renderSpreadSheet()
+        }
+
+        function generateCellsConstants(cells){
+            return cells.map((rows, x)=>{
+                return rows.map((cell, y)=>{
+                    const letter = getColumn(x) // -> A
+                    const cellId = `${letter}${y+1}` // -> A1
+                    return `const ${cellId} = ${cell.computedValue};`
+
+                }).join('\n')
+            }).join('\n')
+        }
+
+        function computeAllCells(cells, constants){
+            cells.forEach((rows, x)=>{
+                rows.forEach((cell, y) =>{
+                    const computedValue = computeValue(cell.value, constants)
+                    cell.computedValue = computedValue
+                })
+            })
+        }
+
+        function computeValue(value, constants){
+            if(typeof value === 'number') return value
+            if(!value.startsWith('=')) return value
+
+            const formula = value.slice(1)
+
+            let computedValue
+            try{
+                computedValue = eval(`(() => {
+                ${constants}
+                return ${formula};
+            })()`)
+            }catch(e){
+                computedValue = `!ERROR: ${e.message}`
+            }
+
+            return computedValue
+        }
+
+        const renderSpreadSheet = () => {
+            const headerHTML = `<tr>
+                                    <th></th>
+                                    ${range(COLUMNS).map(i => `<th>${getColumn(i)}</th>`).join('')}  
+                                    
+                                </tr>`
+
+            $head.innerHTML = headerHTML;
+
+            const bodyHTML = range(ROWS).map(row =>{
+                return `<tr>
+                    <td>${row + 1}</td>
+                    ${range(COLUMNS).map(column => `
+                    <td data-x="${column}" data-y="${row}">
+                        <span>${STATE[column][row].computedValue}</span>
+                        <input type="text" value="${STATE[column][row].value}"/>
+                    </td>`).join('')}
+                </tr>`
+            }).join('')
+
+            $body.innerHTML = bodyHTML
+
+
+
+        }
+
+        $body.addEventListener('click', event => {
+            const td = event.target.closest('td')
+            if(!td) return
+
+            const {x, y} = td.dataset
+            const input = td.querySelector('input')
+            const span = td.querySelector('span')
+
+            const end = input.value.length
+            input.setSelectionRange(end, end)
+            input.focus()
+            // td.classList.add('editing')
+            // console.log(x, y)
+            // console.log(td)
+            // console.log(event.target)
+
+            $$('.selected').forEach(el => el.classList.remove('selected'))
+
+            selectedColum = null
+
+            input.addEventListener('keydown',(event)=>{
+                if(event.key === 'Enter') input.blur()
+            })
+
+            input.addEventListener('blur', ()=> {
+                console.log({value: input.value, state: STATE[x][y].value})
+
+                if(input.value === STATE[x][y].value) return
+
+                updateCell({x, y, value: input.value})
+
+            }, {once: true})
+        })
+
+        $head.addEventListener('click', event => {
+            const th = event.target.closest('th')
+
+            if(!th) return
+
+          const x =  [...th.parentNode.children].indexOf(th)
+
+          if(x <= 0) return
+
+          selectedColum = x -1
+
+          $$('.selected').forEach(el => el.classList.remove('selected'))
+          th.classList.add('selected')
+          $$(`tr td:nth-child(${x + 1})`).forEach(el => el.classList.add('selected'))
+        })
+
+        document.addEventListener('keydown', event =>{
+            if( event.key === 'Backspace' && selectedColum !== null){
+                range(ROWS).forEach( row => {
+                    updateCell({x: selectedColum, y: row, value: ''})
+                })
+                renderSpreadSheet()
+            }
+
+        })
+
+        document.addEventListener('copy', event => {
+            console.log('copy')
+            if(selectedColum !== null) {
+                const columnValues = range(ROWS).map(row => {
+                return STATE[selectedColum][row].computedValue
+            })
+
+            event.clipboardData.setData('text/plain', columnValues.join('\n'))
+            event.preventDefault()
+                
+            }
+
+        })
+
+        document.addEventListener('click', event => {
+            const {target} = event
+
+            const isThClicked = target.closest('th')
+            const isTdClicked = target.closest('td')
+
+            if(!isTdClicked && !isThClicked){
+                $$('.selected').forEach(el => el.classList.remove('selected'))
+
+                selectedColum = null
+            }
+        })
+        renderSpreadSheet()
+    </script>
+</head>
+<body>
+
+    <img src="data:image/png;base64,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"/>
+    <table>
+        <thead></thead>
+        <tbody></tbody>
+    </table>
+</body>
+</html>
